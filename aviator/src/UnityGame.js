@@ -11,86 +11,103 @@ function App() {
   });
 
   const unityCanvasRef = useRef(null);
-  const [inputValue, setInputValue] = useState(0);
+  const [inputValue, setInputValue] = useState(0); // Current multiplier value
+  const [targetMultiplier, setTargetMultiplier] = useState(1); // Target value to lerp to
+  const [isTransitioning, setIsTransitioning] = useState(false); // Transition state
+  const [shouldCrash, setShouldCrash] = useState(false); // Boolean to control crashPlane behavior
 
-  useEffect(() => {
-    const resizeCanvas = () => {
-      if (unityCanvasRef.current) {
-        unityCanvasRef.current.width = window.innerWidth;
-        unityCanvasRef.current.height = window.innerHeight;
-      }
-    };
-
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas(); // Call once to set the initial size
-
-    return () => {
-      window.removeEventListener("resize", resizeCanvas);
-    };
-  }, []);
-
-  // Function to call the API and update inputValue
-const fetchData = async () => {
-  try {
-    // API URL to get a random number
-    const response = await fetch("https://random-data-api.com/api/number/random_number");
-    const data = await response.json();
-    
-    // Assuming the API response contains a field named 'random_number'
-    setInputValue(data.random_number); // Use the returned random number value
-  } catch (error) {
-    console.error("Error fetching data:", error);
-  }
-};
-
-  // Send inputValue to Unity if Unity is loaded
-  const sendToUnity = () => {
+  // Function to send the current value to Unity if Unity is loaded
+  const sendToUnity = (value) => {
     if (isLoaded) {
-      sendMessage("GameManager", "SetTargetMultiplier", inputValue); // Pass the inputValue to Unity
+      sendMessage("GameManager", "multiplier", value);
     } else {
       console.log("Unity is not loaded yet. Skipping sendMessage.");
     }
   };
 
-  // Call fetchData every second and send the updated value to Unity
-  useEffect(() => {
-    const fetchDataIntervalId = setInterval(() => {
-      fetchData(); // Call the API every second
-    }, 1000); // 1000 ms = 1 second
+  // Function to handle lerp transition to the new target multiplier
+  const startTransition = (newTargetMultiplier) => {
+    setIsTransitioning(true); // Mark transition as in progress
+    const startValue = inputValue;
+    const startTime = Date.now();
+    const transitionDuration = 1000; // Transition duration in ms (1 second)
 
-    const sendToUnityIntervalId = setInterval(() => {
-      sendToUnity(); // Send the inputValue to Unity every second
-    }, 1000); // 1000 ms = 1 second
+    const animateTransition = () => {
+      const elapsedTime = Date.now() - startTime;
+      const progress = Math.min(elapsedTime / transitionDuration, 1); // Progress from 0 to 1
 
-    // Cleanup intervals on unmount
-    return () => {
-      clearInterval(fetchDataIntervalId);
-      clearInterval(sendToUnityIntervalId);
+      // Calculate the lerped value (interpolated between start and target)
+      let lerpedValue = startValue + (newTargetMultiplier - startValue) * progress;
+
+      // Round the lerped value to 2 decimal places
+      lerpedValue = Math.round(lerpedValue * 100) / 100;
+
+      setInputValue(lerpedValue);  // Update state with lerped value
+
+      // Send the lerped value to Unity
+      sendToUnity(lerpedValue);
+
+      // Continue animating if not yet finished
+      if (progress < 1) {
+        requestAnimationFrame(animateTransition); // Continue the animation
+      } else {
+        setIsTransitioning(false); // Transition is complete
+      }
     };
-  }, [isLoaded, inputValue]); // Dependencies: isLoaded and inputValue
 
-  // Function to send the message to Unity to call `crashPlane()` in the GameManager
-  const crashPlane = () => {
+    animateTransition(); // Start the animation
+  };
+
+  // Fetch data from the backend to get the new target multiplier and boolean value for crashPlane
+  const fetchData = async () => {
+    try {
+      const response = await fetch("https://random-data-api.com/api/number/random_number");
+      const data = await response.json();
+      
+      // Assuming the API returns a "random_number" field for the multiplier and "should_crash" boolean field for crashPlane
+      const newMultiplier = data["multiplier"]; // Get the new multiplier value
+      const shouldCrashValue = data["running"]; // Get the boolean value for crashPlane
+
+      setTargetMultiplier(newMultiplier); // Set the new target multiplier
+      startTransition(newMultiplier); // Start transitioning to the new multiplier
+
+      // Set the value for whether or not to crash the plane
+      setShouldCrash(shouldCrashValue);
+
+      // Call crashPlane with the boolean value
+      crashPlane(shouldCrashValue); // Pass the boolean value to crashPlane
+
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    }
+  };
+
+  // Set an interval to fetch the new target multiplier and boolean value every second
+  useEffect(() => {
     if (isLoaded) {
-      sendMessage("GameManager", "crashPlane");
+      const intervalId = setInterval(() => {
+        fetchData(); // Fetch the new target multiplier and crash boolean every second
+      }, 1000); // 1000 ms = 1 second
+
+      // Cleanup the interval when the component unmounts
+      return () => clearInterval(intervalId);
+    }
+  }, [isLoaded]); // Wait for Unity to load before fetching data
+
+  // Function to call crashPlane with a boolean parameter
+  const crashPlane = (shouldCrash) => {
+    if (isLoaded) {
+      sendMessage("GameManager", "crashPlane", shouldCrash); // Pass the boolean value to crashPlane
     } else {
       console.log("Unity is not loaded yet. Skipping crashPlane call.");
     }
   };
 
-  // Set interval to call crashPlane every 5 seconds
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      crashPlane(); // Call crashPlane every 5 seconds
-    }, 5000); // 5000 ms = 5 seconds
-
-    // Cleanup the interval when the component unmounts
-    return () => clearInterval(intervalId);
-  }, [isLoaded]); // Empty dependency array ensures it runs only once on mount
-
   return (
     <div className="unity-container">
       <Unity unityProvider={unityProvider} canvasRef={unityCanvasRef} />
+      <p>Current Multiplier: {inputValue.toFixed(2)}</p> {/* Display the current multiplier */}
+      <p>Should Crash Plane: {shouldCrash ? "Yes" : "No"}</p> {/* Display whether crashPlane was triggered */}
     </div>
   );
 }
