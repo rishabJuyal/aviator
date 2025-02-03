@@ -14,7 +14,9 @@ function App() {
   const [inputValue, setInputValue] = useState(0); // Current multiplier value
   const [targetMultiplier, setTargetMultiplier] = useState(1); // Target value to lerp to
   const [isTransitioning, setIsTransitioning] = useState(false); // Transition state
-  const [shouldCrash, setShouldCrash] = useState(false); // Boolean to control crashPlane behavior
+  const previousTargetMultiplier = useRef(targetMultiplier); // Track the last target multiplier
+
+  const [isPlaneCrashed, setIsPlaneCrashed] = useState(false); // To toggle crashing state
 
   // Function to send the current value to Unity if Unity is loaded
   const sendToUnity = (value) => {
@@ -27,6 +29,10 @@ function App() {
 
   // Function to handle lerp transition to the new target multiplier
   const startTransition = (newTargetMultiplier) => {
+    if (newTargetMultiplier === previousTargetMultiplier.current) {
+      return; // No need to start a new transition if the target hasn't changed
+    }
+
     setIsTransitioning(true); // Mark transition as in progress
     const startValue = inputValue;
     const startTime = Date.now();
@@ -52,62 +58,58 @@ function App() {
         requestAnimationFrame(animateTransition); // Continue the animation
       } else {
         setIsTransitioning(false); // Transition is complete
+        previousTargetMultiplier.current = newTargetMultiplier; // Update the ref
       }
     };
 
     animateTransition(); // Start the animation
   };
 
-  // Fetch data from the backend to get the new target multiplier and boolean value for crashPlane
+  // Function to fetch data (multiplier and crash state) from the backend API
   const fetchData = async () => {
     try {
       const response = await fetch("https://random-data-api.com/api/number/random_number");
       const data = await response.json();
-      
-      // Assuming the API returns a "random_number" field for the multiplier and "should_crash" boolean field for crashPlane
-      const newMultiplier = data["multiplier"]; // Get the new multiplier value
-      const shouldCrashValue = data["running"]; // Get the boolean value for crashPlane
+      const newMultiplier = data["multiplier"]; // Assuming the API returns a "random_number" field
+
+      // Simulating a boolean crash value from the API
+      const crashState = data["running"]; // Randomly set true or false for demo purposes
 
       setTargetMultiplier(newMultiplier); // Set the new target multiplier
-      startTransition(newMultiplier); // Start transitioning to the new multiplier
+      setIsPlaneCrashed(crashState); // Set the new crash state
 
-      // Set the value for whether or not to crash the plane
-      setShouldCrash(shouldCrashValue);
-
-      // Call crashPlane with the boolean value
-      crashPlane(shouldCrashValue); // Pass the boolean value to crashPlane
-
+      // Start transitioning to the new multiplier
+      startTransition(newMultiplier);
+      
     } catch (error) {
       console.error("Error fetching data:", error);
     }
   };
 
-  // Set an interval to fetch the new target multiplier and boolean value every second
+  // Set an interval to fetch the new target multiplier and crash state every second
   useEffect(() => {
     if (isLoaded) {
       const intervalId = setInterval(() => {
-        fetchData(); // Fetch the new target multiplier and crash boolean every second
+        fetchData(); // Fetch the new data (multiplier and crash state)
       }, 1000); // 1000 ms = 1 second
 
       // Cleanup the interval when the component unmounts
       return () => clearInterval(intervalId);
     }
-  }, [isLoaded]); // Wait for Unity to load before fetching data
+  }, [isLoaded]); // Wait for Unity to load before starting the interval
 
-  // Function to call crashPlane with a boolean parameter
-  const crashPlane = (shouldCrash) => {
+  // Send the current plane crash state to Unity
+  useEffect(() => {
     if (isLoaded) {
-      sendMessage("GameManager", "crashPlane", shouldCrash); // Pass the boolean value to crashPlane
-    } else {
-      console.log("Unity is not loaded yet. Skipping crashPlane call.");
+      sendMessage("GameManager", "crashingPlane", isPlaneCrashed ? "true" : "false"); // Send the crash state as a string
     }
-  };
+  }, [isPlaneCrashed, isLoaded]); // Send updated crash state to Unity when it changes
 
   return (
     <div className="unity-container">
       <Unity unityProvider={unityProvider} canvasRef={unityCanvasRef} />
       <p>Current Multiplier: {inputValue.toFixed(2)}</p> {/* Display the current multiplier */}
-      <p>Should Crash Plane: {shouldCrash ? "Yes" : "No"}</p> {/* Display whether crashPlane was triggered */}
+      <p>Plane Crashed: {isPlaneCrashed ? "Yes" : "No"}</p> {/* Display the current crash state */}
     </div>
   );
 }
