@@ -12,11 +12,10 @@ function App() {
 
   const unityCanvasRef = useRef(null);
   const [inputValue, setInputValue] = useState(0); // Current multiplier value
-  const [targetMultiplier, setTargetMultiplier] = useState(1); // Target value to lerp to
   const [isTransitioning, setIsTransitioning] = useState(false); // Transition state
-  const previousTargetMultiplier = useRef(targetMultiplier); // Track the last target multiplier
-
   const [isPlaneCrashed, setIsPlaneCrashed] = useState(false); // To toggle crashing state
+  const previousTargetMultiplier = useRef(1); // Track previous target multiplier
+  const inputValueRef = useRef(inputValue); // Track the latest inputValue (to avoid reset)
 
   // Function to send the current value to Unity if Unity is loaded
   const sendToUnity = (value) => {
@@ -29,12 +28,12 @@ function App() {
 
   // Function to handle lerp transition to the new target multiplier
   const startTransition = (newTargetMultiplier) => {
-    if (newTargetMultiplier === previousTargetMultiplier.current) {
-      return; // No need to start a new transition if the target hasn't changed
+    if (newTargetMultiplier === previousTargetMultiplier.current || isPlaneCrashed) {
+      return; // Don't start a new transition if the target hasn't changed or plane is crashed
     }
 
     setIsTransitioning(true); // Mark transition as in progress
-    const startValue = inputValue;
+    const startValue = inputValueRef.current; // Use ref to avoid reset on re-render
     const startTime = Date.now();
     const transitionDuration = 1000; // Transition duration in ms (1 second)
 
@@ -49,6 +48,7 @@ function App() {
       lerpedValue = Math.round(lerpedValue * 100) / 100;
 
       setInputValue(lerpedValue);  // Update state with lerped value
+      inputValueRef.current = lerpedValue; // Update the ref with the latest value
 
       // Send the lerped value to Unity
       sendToUnity(lerpedValue);
@@ -68,19 +68,26 @@ function App() {
   // Function to fetch data (multiplier and crash state) from the backend API
   const fetchData = async () => {
     try {
-      const response = await fetch("https://random-data-api.com/api/number/random_number");
+      const response = await fetch("http://192.168.31.3:7777/v1/virtual/aviator/getCurrentGame");
       const data = await response.json();
-      const newMultiplier = data["multiplier"]; // Assuming the API returns a "random_number" field
+      const newMultiplier = data["multiplierRange"]; // Assuming the API returns a "random_number" field
 
       // Simulating a boolean crash value from the API
-      const crashState = data["running"]; // Randomly set true or false for demo purposes
+      const crashState = data["isAlive"]; // Randomly set true or false for demo purposes
 
-      setTargetMultiplier(newMultiplier); // Set the new target multiplier
       setIsPlaneCrashed(crashState); // Set the new crash state
 
-      // Start transitioning to the new multiplier
-      startTransition(newMultiplier);
-      
+      // If the plane is not crashed, we start transitioning to the new multiplier
+      if (crashState && newMultiplier !== previousTargetMultiplier.current) {
+        startTransition(newMultiplier); // Start transitioning if the new multiplier is different
+      }
+
+      // If the plane is crashed, reset multiplier to 1
+      if (!crashState) {
+        setInputValue(1); // Reset multiplier to 1
+        inputValueRef.current = 1; // Update the ref to match the reset value
+      }
+
     } catch (error) {
       console.error("Error fetching data:", error);
     }
@@ -113,5 +120,3 @@ function App() {
     </div>
   );
 }
-
-export default App;
